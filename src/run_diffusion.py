@@ -1,6 +1,13 @@
 import random
 import csv
 
+def log_iteration(G, iteration, writer):
+    """Log all nodes' state for the given iteration."""
+    for node in G.nodes():
+        opinion = G.nodes[node]["opinion"]
+        threshold = G.nodes[node]["threshold"]
+        writer.writerow([iteration, node, opinion, threshold])
+
 def decide_opinion(current, yes_count, no_count, threshold):
     yes_ok = yes_count >= threshold
     no_ok = no_count >= threshold
@@ -17,24 +24,19 @@ def decide_opinion(current, yes_count, no_count, threshold):
     return current
 
 
-def log_iteration(G, iteration, writer):
-    for node, data in G.nodes(data=True):
-        writer.writerow([
-            iteration,
-            node,
-            data["opinion"] if data["opinion"] is not None else "Neutral",
-            data["threshold"]
-        ])
-
-
 def run_diffusion(G, max_iterations=100, log_csv_path="results/simulation_log.csv"):
-    history = {"Yes": [], "No": [], "Neutral": []}
+    history = {
+        "Yes": [],
+        "No": [],
+        "Neutral": []
+    }
 
+    # 🔹 NEW: open CSV file
     with open(log_csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["iteration", "node", "opinion", "threshold"])
 
-        # Log initial state
+        # 🔹 NEW: log initial state (iteration 0)
         log_iteration(G, 0, writer)
 
         for iteration in range(1, max_iterations + 1):
@@ -62,6 +64,7 @@ def run_diffusion(G, max_iterations=100, log_csv_path="results/simulation_log.cs
                 if new_opinion != current:
                     updates[node] = new_opinion
 
+            # STOP if converged
             if not updates:
                 print(f"Converged at iteration {iteration}")
                 break
@@ -70,10 +73,10 @@ def run_diffusion(G, max_iterations=100, log_csv_path="results/simulation_log.cs
             for node, op in updates.items():
                 G.nodes[node]["opinion"] = op
 
-            # Log iteration
+            # 🔹 NEW: log current iteration
             log_iteration(G, iteration, writer)
 
-            # Stats
+            # Track stats
             yes = no = neutral = 0
             for _, data in G.nodes(data=True):
                 if data["opinion"] == "Yes":

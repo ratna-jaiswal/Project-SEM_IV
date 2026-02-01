@@ -1,81 +1,48 @@
-import networkx as nx
+# src/stats.py
+import csv
+import os
+import matplotlib.pyplot as plt
+from constants import OPINION_MAP, REV_OPINION_MAP
 
-def opinion_counts(G):
-    counts = {"Yes": 0, "No": 0, "Neutral": 0}
-    for _, d in G.nodes(data=True):
-        if d["opinion"] == "Yes":
-            counts["Yes"] += 1
-        elif d["opinion"] == "No":
-            counts["No"] += 1
-        else:
-            counts["Neutral"] += 1
-    return counts
+LOG_DIR = "results/logs"
+PLOT_DIR = "results/plots"
 
+def save_stats(stats_history):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    path = os.path.join(LOG_DIR, "stats.csv")
 
-def opinion_fractions(G):
-    total = G.number_of_nodes()
-    return {k: round(v / total, 3) for k, v in opinion_counts(G).items()}
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["itr", "A", "B", "C", "D", "E"])
 
+        for itr, stats in enumerate(stats_history):
+            writer.writerow([itr] + list(stats.values()))
 
-def degree_stats(G):
-    degrees = [deg for _, deg in G.degree()]
-    return {
-        "min": min(degrees),
-        "max": max(degrees),
-        "avg": round(sum(degrees) / len(degrees), 2)
-    }
+    print(f"💾 Stats CSV saved → {path}")
 
 
-def clustering_stats(G):
-    return round(nx.average_clustering(G), 3)
+def plot_stats(stats_history):
+    os.makedirs(PLOT_DIR, exist_ok=True)
+    path = os.path.join(PLOT_DIR, "opinion_stats.png")
 
+    opinions = ["A", "B", "C", "D", "E"]
+    plt.figure(figsize=(10, 6))
 
-def connected_components_stats(G):
-    comps = list(nx.connected_components(G))
-    sizes = [len(c) for c in comps]
-    return {
-        "num_components": len(comps),
-        "largest_component_size": max(sizes)
-    }
+    for op in opinions:
+        plt.plot(
+            [s[op] for s in stats_history],
+            label=op,
+            linewidth=2
+        )
 
+    plt.xlabel("Iteration")
+    plt.ylabel("Number of Nodes")
+    plt.title("Opinion Evolution Over Iterations")
+    plt.legend()
+    plt.grid(alpha=0.3)
 
-def centrality_stats(G, top_k=5):
-    deg_c = nx.degree_centrality(G)
-    bet_c = nx.betweenness_centrality(G)
+    plt.tight_layout()
+    plt.savefig(path, dpi=200)
+    plt.close()
 
-    return {
-        "top_degree_centrality": sorted(deg_c.items(), key=lambda x: x[1], reverse=True)[:top_k],
-        "top_betweenness_centrality": sorted(bet_c.items(), key=lambda x: x[1], reverse=True)[:top_k]
-    }
-
-
-def convergence_type(G):
-    c = opinion_counts(G)
-    non_neutral = c["Yes"] + c["No"]
-
-    if non_neutral == 0:
-        return "All Neutral"
-    if c["Yes"] == non_neutral:
-        return "Yes Consensus"
-    if c["No"] == non_neutral:
-        return "No Consensus"
-    return "Polarized"
-
-
-def print_detailed_stats(G):
-    print("\n===== OPINION STATS =====")
-    print("Counts     :", opinion_counts(G))
-    print("Fractions  :", opinion_fractions(G))
-
-    print("\n===== NETWORK STATS =====")
-    print("Degree     :", degree_stats(G))
-    print("Clustering :", clustering_stats(G))
-    print("Components :", connected_components_stats(G))
-
-    print("\n===== INFLUENCE =====")
-    c = centrality_stats(G)
-    print("Top Degree Centrality     :", c["top_degree_centrality"])
-    print("Top Betweenness Centrality:", c["top_betweenness_centrality"])
-
-    print("\n===== OUTCOME =====")
-    print("Convergence Type:", convergence_type(G))
+    print(f"📈 Opinion evolution plot saved → {path}")
