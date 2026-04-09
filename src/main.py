@@ -1,157 +1,174 @@
+#main.py
+
+import random
 import pandas as pd
 import matplotlib.pyplot as plt
+import networkx as nx
 from pathlib import Path
 
- 
-# Paths & folders
- 
+from data_generation import generate_network, generate_news, generate_users
+from imbd_dataset import generate_news_from_imdb
+from graph_utils import (
+    draw_network_graph,
+    plot_opinion_evolution,
+    plot_opinion_variance,
+    plot_user_trajectories,
+    plot_distribution_kde,
+    plot_opinion_distribution_per_iteration
+)
+
+SEED = 42
+# random.seed(SEED)
+
+# PATH SETUP (IMPORTANT)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-DATA_DIR = BASE_DIR / "data" / "raw"
-PLOTS_DIR = BASE_DIR / "results" / "plots"
+DATA_RAW_DIR = BASE_DIR / "data" / "raw"
 LOGS_DIR = BASE_DIR / "results" / "logs"
+PLOTS_DIR = BASE_DIR / "results" / "plots"
 
-PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+DATA_RAW_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
- 
-# Load news data
- 
-news = pd.read_csv(DATA_DIR / "news.csv")
-news_map = news.set_index("news_id")
+# 4. Core Bias Functions
 
- 
-# Initial preference ranking (given by the person)
- 
-initial_ranking = [
-    "N3", "N1", "N7", "N5", "N2",
-    "N4", "N6", "N8", "N9", "N10"
-]
+def ideological_congruence(user, row):
+    return user["opinion"] * row["polarity"]
 
- 
-# Scoring function (FEATURE-WISE)
- 
-def news_score(row, revealed_features):
-    score = 0
+def bias_susceptibility(user, row):
+    return max(0, min(1,
+        0.4 * user["belief_strength"] +
+        0.3 * (1 - user["thinking_style"]) +
+        0.3 * row["issue_strength"]
+    ))
 
-    if "polarity" in revealed_features:
-        score += row["polarity"] * 1
-        # score += row["polarity"] * 0.95
+def news_score(user, row):
+    congruence = ideological_congruence(user, row)
+    bias = bias_susceptibility(user, row)
+    return (1 - bias) * 0.5 + bias * congruence
 
-    if "truth" in revealed_features:
-        score += row["truth"] * 1
-        # score += row["truth"] * 0.81
+def rank_news(user, news_df):
+    scores = {nid: news_score(user, row) for nid, row in news_df.iterrows()}
+    return sorted(scores, key=scores.get, reverse=True)
 
-    if "emotion_strength" in revealed_features:
-        score += row["emotion_strength"] * 1
-        # score += row["emotion_strength"] * 0.78
+def perceived_trust(user, row):
+    congruence = ideological_congruence(user, row)
+    bias = bias_susceptibility(user, row)
+    trust = 0.5 + 0.5 * congruence * bias
+    return max(0, min(1, trust))
 
-    if "reach" in revealed_features:
-        score += row["reach"] * 1
-        # score += row["reach"] * 0.23
+def update_opinion_from_news(user, row, lr=0.1):
+    trust = perceived_trust(user, row)
+    user["opinion"] += lr * trust * (row["polarity"] - user["opinion"])
+    user["belief_strength"] = min(
+        1, user["belief_strength"] + 0.05 * trust * abs(row["polarity"])
+    )
 
-    if "novelty" in revealed_features:
-        score += row["novelty"] * 1
-        # score += row["novelty"] * 0.58
+def social_influence(user_id, users, G, alpha=0.2):
+    neighbors = list(G.neighbors(user_id))
+    if neighbors:
+        avg = sum(users[n]["opinion"] for n in neighbors) / len(neighbors)
+        users[user_id]["opinion"] += alpha * (avg - users[user_id]["opinion"])
 
-    return score
 
- 
-# Re-ranking logic
- 
-def rerank(current_ranking, revealed_features):
-    scores = {}
+# 5. Simulation Parameters
 
-    for nid in current_ranking:
-        scores[nid] = news_score(news_map.loc[nid], revealed_features)
+NUM_USERS = 100
+FEED_ROUNDS = 20
+TOP_K = 10
 
-    return sorted(current_ranking, key=lambda x: scores[x], reverse=True)
+# 6. Generate Static Data
 
- 
-# Feature-wise reveal order
- 
-feature_reveal_order = [
-    "polarity",
-    "truth",
-    "emotion_strength",
-    "reach",
-    "novelty"
-]
+# news = generate_news()
+news = generate_news_from_imdb("D:/SEM-6/Project/data/raw/IMDB Dataset.csv", output_path="D:/SEM-6/Project/data/raw/imdb_generated_dataset.xlsx")
+# news = pd.read_excel("D:/SEM-6/Project/data/raw/imdb_generated_dataset.xlsx")
+# news.set_index("news_id", inplace=True)
+# news = news.sample(5000, random_state=42)
+users = generate_users(NUM_USERS)
+G = generate_network(NUM_USERS)
 
- 
-# Simulation
- 
-ranking = initial_ranking.copy()
-revealed_features = []
-ranking_history = []
+# Save datasets
+news.reset_index().to_excel(DATA_RAW_DIR / "news_generated.xlsx", index=False)
+pd.DataFrame.from_dict(users, orient="index").to_excel(
+    DATA_RAW_DIR / "users_generated.xlsx"
+)
+pd.DataFrame(G.edges(), columns=["source", "target"]).to_excel(
+    DATA_RAW_DIR / "network_edges.xlsx", index=False
+)
 
-for step, feature in enumerate(feature_reveal_order):
-    revealed_features.append(feature)
-    ranking = rerank(ranking, revealed_features)
+#    NETWORK GRAPH
 
-    ranking_history.append({
-        "step": step,
-        "revealed_feature": feature,
-        "ranking": ranking.copy()
-    })
+draw_network_graph(G, users, PLOTS_DIR / "network_initial.png")
 
-    print(f"After revealing feature: {feature}")
-    print(ranking)
-    print("-" * 40)
 
- 
-# Helper: rank position
- 
-def rank_position(ranking, news_id):
-    return ranking.index(news_id) + 1
+# 7. Simulation Loop
 
- 
-# Save ranking log in WIDE format
- 
-all_news_ids = news["news_id"].tolist()
+log_rows = []
+ranking_log = []
 
-wide_log = {"news_id": all_news_ids}
+for t in range(FEED_ROUNDS):
+    for uid, user in users.items():
 
-for step in ranking_history:
-    step_no = step["step"]
-    ranking = step["ranking"]
+        ranking = rank_news(user, news)
 
-    col_name = f"step{step_no}"
-    wide_log[col_name] = [
-        rank_position(ranking, nid) for nid in all_news_ids
-    ]
+        ranking_log.append({
+            "iteration": t,
+            "user_id": uid,
+            "top_news": ranking[:TOP_K]
+        })
 
-wide_log_df = pd.DataFrame(wide_log)
+        for nid in ranking[:TOP_K]:
+            update_opinion_from_news(user, news.loc[nid])
 
-wide_log_df.to_csv(
-    LOGS_DIR / "preference_ranking_log_wide1.csv",
+        social_influence(uid, users, G)
+
+        log_rows.append({
+            "iteration": t,
+            "user_id": uid,
+            "opinion": user["opinion"],
+            "belief_strength": user["belief_strength"],
+            "thinking_style": user["thinking_style"]
+        })
+
+
+# 8. Save Logs
+
+pd.DataFrame(log_rows).to_excel(
+    LOGS_DIR / "confirmation_bias_network_log.xlsx",
     index=False
 )
 
- 
-# Plot: all news preference changes
- 
-all_news_ids = news["news_id"].tolist()
-rank_positions = {nid: [] for nid in all_news_ids}
+# Convert logs to DataFrame
+log_df = pd.DataFrame(log_rows)
 
-for step in ranking_history:
-    ranking = step["ranking"]
-    for nid in all_news_ids:
-        rank_positions[nid].append(rank_position(ranking, nid))
+# ======================
+# GENERATE ALL GRAPHS
+# ======================
 
-plt.figure(figsize=(10, 6))
+# 1. Final network graph
+draw_network_graph(G, users, PLOTS_DIR / "network_final.png", title="Final Network")
 
-for nid, positions in rank_positions.items():
-    plt.plot(positions, marker="o", label=nid, alpha=0.8)
+# 2. Opinion evolution
+plot_opinion_evolution(log_df, PLOTS_DIR / "opinion_evolution.png")
 
-plt.xlabel("Feature reveal step")
-plt.ylabel("Rank position")
-plt.title("Change in Preference Order (Feature-wise Reveal)")
-plt.gca().invert_yaxis()
-plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-plt.tight_layout()
+# 3. Polarization (variance)
+plot_opinion_variance(log_df, PLOTS_DIR / "polarization.png")
 
-plt.savefig(PLOTS_DIR / "all_news_preference_changes1.png")
-plt.show()
+# 5. Opinion distribution (KDE)
+plot_distribution_kde(log_df, PLOTS_DIR / "distribution_kde.png")
+
+# 6. User trajectories
+plot_user_trajectories(log_df, PLOTS_DIR / "user_trajectories.png")
+
+# 7. Opinion distribution per iteration
+plot_opinion_distribution_per_iteration(log_df, PLOTS_DIR / "opinion_distribution_per_iteration.png")
+
+
+pd.DataFrame(ranking_log).to_excel(
+    LOGS_DIR / "ranking_log.xlsx",
+    index=False
+)
 
 
