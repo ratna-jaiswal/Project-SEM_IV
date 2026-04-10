@@ -3,15 +3,16 @@ import networkx as nx
 import random
 from tqdm import tqdm
 import os
+import math
 
 # =========================
 # PARAMETERS
 # =========================
-NUM_ITERATIONS = 20
-REVIEWS_PER_ITER = 10
+NUM_ITERATIONS = 50
+REVIEWS_PER_ITER = 100
 
-alpha = 0.4   # neighbors influence
-beta = 0.3    # reviews influence
+alpha = 0.1   # neighbors influence
+beta = 0.05    # reviews influence
 
 base_path = r"D:\SEM-6\Project\data\raw"
 
@@ -77,18 +78,19 @@ for it in tqdm(range(NUM_ITERATIONS), desc="Iterations"):
         review_sample = random.sample(opinion_list, REVIEWS_PER_ITER)
         review_avg = sum(review_sample) / len(review_sample)
 
-        # -------- update rule --------
+        # -------- update rule (NON-LINEAR) --------
+
         if current_opinion is None:
-            new_opinion = 0.5 * neighbor_avg + 0.5 * review_avg
+            raw_update = 0.5 * neighbor_avg + 0.5 * review_avg
         else:
-            new_opinion = (
+            raw_update = (
                 (1 - alpha - beta) * current_opinion
                 + alpha * neighbor_avg
                 + beta * review_avg
             )
 
-        # clamp to [-1, 1]
-        new_opinion = max(-1, min(1, new_opinion))
+        # Apply non-linear transformation
+        new_opinion = math.tanh(1.5 * raw_update)
 
         new_opinions[node] = new_opinion
 
@@ -106,12 +108,13 @@ for it in tqdm(range(NUM_ITERATIONS), desc="Iterations"):
 log_df = pd.DataFrame(opinion_logs).T
 
 log_df.columns = [f"Iter_{i}" for i in range(NUM_ITERATIONS + 1)]
+log_df = log_df.sort_index()
 log_df.insert(0, "Node", log_df.index)
 
 # =========================
 # SAVE OUTPUT
 # =========================
-output_path = os.path.join(base_path, "opinion_dynamics.xlsx")
+output_path = os.path.join(r"D:\SEM-6\Project\results\logs", "opinion_dynamics.xlsx")
 log_df.to_excel(output_path, index=False)
 
 print(f"✅ Simulation complete. File saved at: {output_path}")

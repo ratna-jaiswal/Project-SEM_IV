@@ -7,16 +7,19 @@ import os
 # PARAMETERS
 # =========================
 NUM_NODES = 100
-INITIAL_OPINION_PERCENT = 0.4
+INITIAL_OPINION_PERCENT = 0.5
 
 # Save path
 base_path = r"D:\SEM-6\Project\data\raw"
 os.makedirs(base_path, exist_ok=True)
 
 # =========================
-# CREATE NETWORK (Small World)
+# CREATE NETWORK (Scale-Free - Highly Connected)
 # =========================
-G = nx.watts_strogatz_graph(NUM_NODES, k=6, p=0.3)
+G = nx.barabasi_albert_graph(NUM_NODES, m=4)  # Uncomment for scale-free network
+
+# Or keep Small World for controlled connectivity
+# G = nx.watts_strogatz_graph(NUM_NODES, k=10, p=0.1)
 
 # =========================
 # SAVE EDGES (source-target)
