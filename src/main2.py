@@ -11,8 +11,8 @@ import math
 NUM_ITERATIONS = 50
 REVIEWS_PER_ITER = 100
 
-alpha = 0.1   # neighbors influence
-beta = 0.05    # reviews influence
+alpha = 0.15   # neighbors influence
+beta = 0.1   # reviews influence
 
 base_path = r"D:\SEM-6\Project\data\raw"
 
